@@ -1149,10 +1149,13 @@ export default class SimulationEngine {
   // FIRE RESOLUTION
   // ============================================================
   fireAtTarget(unit, target, distance) {
+    // Re-validate that this unit can actually damage the target
+    const armorMult = this.getArmorMultiplier(unit.weapon, target.armor, target.category);
+    if (armorMult <= 0.08) return; // Cannot damage this target type
+    
     const elevMult    = this.getElevationMultiplier(unit);
     const rangeRatio  = Math.min(1, distance / (unit.range * elevMult));
     const rangeFalloff = Math.max(0.10, 1 - Math.pow(rangeRatio, 1.3));
-    const armorMult   = this.getArmorMultiplier(unit.weapon, target.armor, target.category);
     const suppPenalty = Math.max(0.18, 1 - unit.suppression);
     const coverBonus  = this.isInCover(target) ? 0.65 : 1.0; // cover reduces hit chance
 
