@@ -1160,12 +1160,13 @@ export default class SimulationEngine {
     
     const elevMult    = this.getElevationMultiplier(unit);
     const rangeRatio  = Math.min(1, distance / (unit.range * elevMult));
-    const rangeFalloff = Math.max(0.10, 1 - Math.pow(rangeRatio, 1.3));
+    // Steeper range falloff: accuracy drops significantly beyond 50% of max range
+    const rangeFalloff = Math.max(0.08, 1 - Math.pow(rangeRatio, 0.9));
     const suppPenalty = Math.max(0.18, 1 - unit.suppression);
     const coverBonus  = this.isInCover(target) ? 0.65 : 1.0; // cover reduces hit chance
 
     let hitChance = unit.accuracy * rangeFalloff * armorMult * suppPenalty * coverBonus;
-    hitChance = Math.max(0, Math.min(0.88, hitChance));
+    hitChance = Math.max(0, Math.min(0.85, hitChance));
 
     unit.ammo  -= 1;
     unit.ammoSpent = (unit.ammoSpent || 0) + 1;

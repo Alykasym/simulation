@@ -64,8 +64,8 @@ const baseTemplates = [
     primaryWeapon: INFANTRY_WEAPONS.AK74,
     secondaryWeapon: "SVD Dragunov 7.62x54mm",
     weaponCaliber: "7.62x54mmR",
-    range: 1200,          // Effective range SVD: 1200m
-    detection: 1600,      // with optics/spotter
+    range: 600,          // Typical effective engagement 300-600m, max 800m
+    detection: 1000,      // with optics/spotter
     mobility: 1.3,
     ammoLimit: 40,
     accuracy: 0.72,       // Trained marksman
@@ -151,7 +151,7 @@ const baseTemplates = [
     primaryWeapon: INFANTRY_WEAPONS.NSV,
     secondaryWeapon: INFANTRY_WEAPONS.PKM,
     weaponCaliber: "12.7x108mm + 7.62x54mmR",
-    range: 1500,          // NSV effective range
+    range: 800,           // NSV effective range vs ground targets
     detection: 1000,
     mobility: 0.8,
     ammoLimit: 40,
@@ -209,7 +209,7 @@ const baseTemplates = [
     primaryWeapon: INFANTRY_WEAPONS.KORNET,
     secondaryWeapon: INFANTRY_WEAPONS.AK74,
     weaponCaliber: "152mm ATGM",
-    range: 1500,          // Kornet effective range day
+    range: 1000,          // Kornet typical combat engagement range
     detection: 900,
     mobility: 0.8,
     ammoLimit: 8,         // Only a few expensive ATGMs
@@ -240,7 +240,7 @@ const baseTemplates = [
     primaryWeapon: "2A46M 125mm gładkostwolly ýarag",
     secondaryWeapon: "7.62mm PKTM koaksial + 12.7mm KORD zenit",
     weaponCaliber: "125mm HEAT/APFSDS",
-    range: 2000,          // Tank gun effective range
+    range: 1500,          // Tank gun typical combat engagement range
     detection: 1200,
     mobility: 1.2,
     ammoLimit: 22,        // Ready rounds in carousel
@@ -269,7 +269,7 @@ const baseTemplates = [
     primaryWeapon: "2A42 30mm awtomatiki toppuk",
     secondaryWeapon: "9M113 Konkurs ATGM + 7.62mm PKTM",
     weaponCaliber: "30x165mm + 135mm ATGM",
-    range: 1500,          // 30mm effective range
+    range: 800,           // 30mm effective range vs ground targets
     detection: 1000,
     mobility: 1.5,
     ammoLimit: 50,
@@ -298,7 +298,7 @@ const baseTemplates = [
     primaryWeapon: "KPVT 14.5mm agyr makinýaly",
     secondaryWeapon: "PKT 7.62mm koaksial",
     weaponCaliber: "14.5x114mm + 7.62x54mmR",
-    range: 1000,
+    range: 600,           // HMG effective range vs infantry/light vehicles
     detection: 900,
     mobility: 1.6,
     ammoLimit: 60,
@@ -327,7 +327,7 @@ const baseTemplates = [
     primaryWeapon: "KPVT 14.5mm",
     secondaryWeapon: "7.62mm PKT",
     weaponCaliber: "14.5x114mm",
-    range: 1000,
+    range: 600,           // HMG effective combat range
     detection: 1600,      // Extended optics for recon
     mobility: 1.7,
     ammoLimit: 45,
@@ -356,7 +356,7 @@ const baseTemplates = [
     primaryWeapon: "4x AZP-23 23mm owtomatiki toppuk",
     secondaryWeapon: "None (limited ground capability)",
     weaponCaliber: "23x152mm (4 barrels)",
-    range: 2500,          // AA effective ceiling
+    range: 1000,          // AAA effective range vs ground targets
     detection: 1500,
     mobility: 1.3,
     ammoLimit: 24,
@@ -416,7 +416,7 @@ const baseTemplates = [
     primaryWeapon: "2A64 152mm howitser",
     secondaryWeapon: "12.7mm NSV zenit",
     weaponCaliber: "152x620mm",
-    range: 3500,          // 29km conventional, extended to 36km
+    range: 2500,          // SPG indirect fire range (reduced for gameplay balance)
     detection: 900,
     mobility: 0.8,
     ammoLimit: 12,
@@ -445,7 +445,7 @@ const baseTemplates = [
     primaryWeapon: "2B9 82mm awtomat minomýot",
     secondaryWeapon: INFANTRY_WEAPONS.AK74,
     weaponCaliber: "82mm mortar",
-    range: 1600,
+    range: 800,           // Mortar indirect fire range
     detection: 800,
     mobility: 0.6,
     ammoLimit: 18,
@@ -474,7 +474,7 @@ const baseTemplates = [
     primaryWeapon: "40x 122mm raketalar",
     secondaryWeapon: "None",
     weaponCaliber: "122x290mm",
-    range: 4000,          // 20+ km range
+    range: 3000,          // MLRS indirect fire range (reduced for gameplay)
     detection: 1000,
     mobility: 0.7,
     ammoLimit: 8,         // Salvo count (one volley = all rockets)
@@ -505,7 +505,7 @@ const baseTemplates = [
     primaryWeapon: "2x MAM-L / MAM-C smart bombs",
     secondaryWeapon: "None",
     weaponCaliber: "MAM-L 22kg laser guided",
-    range: 1500,
+    range: 800,           // Drone attack altitude/range
     detection: 1800,
     mobility: 2.4,
     ammoLimit: 4,         // 2x dual racks
@@ -534,7 +534,7 @@ const baseTemplates = [
     primaryWeapon: "30mm 2A42 awtomat toppuk",
     secondaryWeapon: "4x AT-6 Spiral ATGM, S-8 rockets",
     weaponCaliber: "30mm + 130mm ATGM + 80mm S-8",
-    range: 1600,
+    range: 1000,          // Gunship attack range
     detection: 1600,
     mobility: 2.2,
     ammoLimit: 18,
@@ -563,7 +563,7 @@ const baseTemplates = [
     primaryWeapon: "30mm GSh-30-2 toppuk",
     secondaryWeapon: "S-25 rockets, KAB-500 bombs, Kh-25/29 missiles",
     weaponCaliber: "30mm + 250/500kg bombs + rockets",
-    range: 2000,
+    range: 1200,          // Attack jet attack run range
     detection: 2000,
     mobility: 2.6,
     ammoLimit: 10,
