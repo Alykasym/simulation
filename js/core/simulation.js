@@ -1295,7 +1295,9 @@ export default class SimulationEngine {
   }
 
   getSpeed(unit) {
-    let spd = unit.speed !== undefined ? unit.speed : unit.mobility * 12;
+    // unit.speed is defined in km/h in the unit dictionary
+    // Convert to game units: divide by 3.6 to get realistic tactical movement
+    let spd = unit.speed !== undefined ? unit.speed / 3.6 : unit.mobility * 12;
     spd *= Math.max(0.18, 1 - unit.suppression * 0.75);
     if (unit.usesRoads) spd *= this.getRoadFactor(unit);
     return spd;
