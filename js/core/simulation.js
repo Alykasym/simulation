@@ -1076,11 +1076,14 @@ export default class SimulationEngine {
   findTarget(unit, enemies) {
     let best = null; let bestScore = -Infinity; let inRange = false;
     const elevMult = this.getElevationMultiplier(unit);
+    // Use weapon range for targeting, not detection range
     const unitRange = unit.range * elevMult;
+    // Detection should be limited by weapon effectiveness - you can spot further than you can shoot
+    const effectiveDetection = Math.min(unit.detection, unitRange * 1.4) * elevMult;
 
     for (const enemy of enemies) {
       const dist = Math.hypot(enemy.x - unit.x, enemy.y - unit.y);
-      if (dist > unit.detection * elevMult) continue;
+      if (dist > effectiveDetection) continue;
       if (!this.hasLineOfSight(unit, enemy)) continue;
       if (!this.canDamageTarget(unit, enemy)) continue;
 
@@ -1098,7 +1101,9 @@ export default class SimulationEngine {
   evaluateTarget(unit, enemy) {
     const dist = Math.hypot(enemy.x - unit.x, enemy.y - unit.y);
     const elevMult = this.getElevationMultiplier(unit);
-    if (dist > unit.detection * elevMult) return null;
+    // Use effective detection based on weapon range
+    const effectiveDetection = Math.min(unit.detection, unit.range * 1.4) * elevMult;
+    if (dist > effectiveDetection) return null;
     if (!this.hasLineOfSight(unit, enemy)) return null;
     if (!this.canDamageTarget(unit, enemy)) return null;
     return { target: enemy, distance: dist, inRange: dist <= unit.range * elevMult };
