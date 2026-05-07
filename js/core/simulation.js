@@ -1428,11 +1428,9 @@ export default class SimulationEngine {
   getArmorMultiplier(weapon, armor, targetCategory) {
     if (weapon === "Anti-Air") return targetCategory === "Aircraft" ? 1.5 : 0.05;
     if (weapon === "None")     return 0;
+    // Only Anti-Air weapons can effectively engage aircraft
+    // All other weapons cannot target aircraft (no fire control systems, etc.)
     if (targetCategory === "Aircraft") {
-      if (weapon === "Explosive")    return 0.5;
-      if (weapon === "Anti-Armor")   return 0.3;
-      if (weapon === "Combined Arms") return 0.6;
-      if (weapon === "Auto Cannon")  return 0.15;
       return 0;
     }
     if (weapon === "Combined Arms") {
