@@ -467,11 +467,14 @@ function resetScenarioState() {
   mapData.roads = [];
   mapData.buildings = [];
   mapData.backgroundImage = null;
-  mapData.topoSeed = Math.floor(Math.random() * 100000);
+  // Use fixed seed for consistent default map, random for generated maps
+  mapData.topoSeed = 42;
   bumpTopoVersion();
 }
 
 function handleGenerateMapOnly() {
+  // Use random seed for new map generation
+  mapData.topoSeed = Math.floor(Math.random() * 100000);
   resetScenarioState();
   generateTerrain();
   generateRoads();
@@ -480,6 +483,8 @@ function handleGenerateMapOnly() {
 }
 
 function handleGenerateDemo(autoStart) {
+  // Use random seed for new map generation
+  mapData.topoSeed = Math.floor(Math.random() * 100000);
   resetScenarioState();
   generateTerrain();
   generateRoads();
@@ -540,13 +545,13 @@ function fbm(x, y, seed, octaves) {
 }
 
 function generateTerrain() {
-  const seed = mapData.topoSeed || 1337;
+  const seed = mapData.topoSeed || 42;
   mapData.hills = [];
 
-  // Generate terrain heightfield using multiple octaves of noise
-  // Then extract hill features from the heightfield
-  const TERRAIN_COLS = 80;
-  const TERRAIN_ROWS = 60;
+  // Military-style terrain: distinct hills with clear ridges and valleys
+  // Using lower frequency noise for larger, more defined features
+  const TERRAIN_COLS = 64;
+  const TERRAIN_ROWS = 48;
   const cellW = MAP_CONFIG.width / TERRAIN_COLS;
   const cellH = MAP_CONFIG.height / TERRAIN_ROWS;
   const heightMap = [];
@@ -555,78 +560,78 @@ function generateTerrain() {
     for (let tx = 0; tx < TERRAIN_COLS; tx += 1) {
       const wx = tx * cellW;
       const wy = ty * cellH;
-      // Multi-octave noise for natural terrain
-      let h = fbm(wx * 0.001, wy * 0.001, seed, 6);
-      // Bias towards valleys with occasional ridges
-      h = Math.pow(h, 0.7);
+      // Multi-octave noise with emphasis on large-scale features
+      let h = fbm(wx * 0.0006, wy * 0.0006, seed, 5);
+      // Add ridge-like features using absolute value of noise gradient
+      const ridge = Math.abs(fbm(wx * 0.0012 + 100, wy * 0.0012 + 100, seed + 50, 3) - 0.5) * 2;
+      h = h * 0.7 + ridge * 0.3;
+      // Exponential curve for distinct highlands vs lowlands
+      h = Math.pow(h, 0.85);
       heightMap.push(h);
     }
   }
 
-  // Extract well-shaped hills from heightfield
-  // We find local maxima in groups
+  // Extract well-defined hill centers from heightfield
   const visited = new Array(TERRAIN_COLS * TERRAIN_ROWS).fill(false);
   const hillCenters = [];
 
-  for (let ty = 1; ty < TERRAIN_ROWS - 1; ty += 1) {
-    for (let tx = 1; tx < TERRAIN_COLS - 1; tx += 1) {
+  for (let ty = 2; ty < TERRAIN_ROWS - 2; ty += 1) {
+    for (let tx = 2; tx < TERRAIN_COLS - 2; tx += 1) {
       const idx = ty * TERRAIN_COLS + tx;
       const h = heightMap[idx];
-      const threshold = 0.62 + hash2D(tx, ty, seed + 100) * 0.15;
+      // Higher threshold for more distinct hills
+      const threshold = 0.55 + hash2D(tx, ty, seed + 100) * 0.12;
 
-      // Local maximum check
-      if (h > threshold) {
-        const neighbors = [
-          heightMap[(ty - 1) * TERRAIN_COLS + tx],
-          heightMap[(ty + 1) * TERRAIN_COLS + tx],
-          heightMap[ty * TERRAIN_COLS + tx - 1],
-          heightMap[ty * TERRAIN_COLS + tx + 1]
-        ];
-        let isMax = true;
-        for (let n = 0; n < neighbors.length; n += 1) {
-          if (neighbors[n] >= h) {
+      // Check if this is a local maximum in a 5x5 neighborhood
+      let isMax = true;
+      for (let dy = -2; dy <= 2 && isMax; dy += 1) {
+        for (let dx = -2; dx <= 2 && isMax; dx += 1) {
+          if (dx === 0 && dy === 0) continue;
+          const ni = (ty + dy) * TERRAIN_COLS + (tx + dx);
+          if (ni >= 0 && ni < heightMap.length && heightMap[ni] >= h) {
             isMax = false;
-            break;
           }
         }
+      }
 
-        if (isMax && !visited[idx]) {
-          // Mark neighbors as visited to prevent overlapping hills
-          const radiusCells = 1 + Math.floor(hash2D(tx, ty, seed + 50) * 2);
-          for (let dy = -radiusCells; dy <= radiusCells; dy += 1) {
-            for (let dx = -radiusCells; dx <= radiusCells; dx += 1) {
-              const ni = (ty + dy) * TERRAIN_COLS + (tx + dx);
-              if (ni >= 0 && ni < visited.length) {
-                visited[ni] = true;
-              }
+      if (isMax && h > threshold && !visited[idx]) {
+        // Mark a larger area as visited to prevent overlapping hills
+        const radiusCells = 2 + Math.floor(hash2D(tx, ty, seed + 50) * 3);
+        for (let dy = -radiusCells; dy <= radiusCells; dy += 1) {
+          for (let dx = -radiusCells; dx <= radiusCells; dx += 1) {
+            const ni = (ty + dy) * TERRAIN_COLS + (tx + dx);
+            if (ni >= 0 && ni < visited.length) {
+              visited[ni] = true;
             }
           }
-
-          // Elevation: 1.2 to 2.8 based on noise
-          const elevation = 1.2 + h * 1.6;
-          // Radius: proportional to elevation, 300-800 meters
-          const radius = 280 + h * 500 + hash2D(tx, ty, seed + 200) * 150;
-
-          hillCenters.push({
-            x: tx * cellW + cellW / 2 + (hash2D(tx, ty, seed + 300) - 0.5) * cellW * 0.5,
-            y: ty * cellH + cellH / 2 + (hash2D(tx, ty, seed + 400) - 0.5) * cellH * 0.5,
-            elevation: Math.round(elevation * 10) / 10,
-            radius: Math.round(radius)
-          });
         }
+
+        // Military map elevations: realistic heights in meters
+        const baseElevation = 100 + h * 250;  // 100-350m base
+        const elevation = Math.round(baseElevation + hash2D(tx, ty, seed + 200) * 50);
+        // Radius proportional to elevation: larger hills are taller
+        const baseRadius = 350 + h * 450;  // 350-800m
+        const radius = Math.round(baseRadius + hash2D(tx, ty, seed + 300) * 100);
+
+        hillCenters.push({
+          x: tx * cellW + cellW / 2 + (hash2D(tx, ty, seed + 400) - 0.5) * cellW * 0.3,
+          y: ty * cellH + cellH / 2 + (hash2D(tx, ty, seed + 500) - 0.5) * cellH * 0.3,
+          elevation: elevation,
+          radius: radius
+        });
       }
     }
   }
 
-  // Limit hills and add them
-  const targetHills = Math.min(hillCenters.length, 35 + Math.floor(Math.random() * 20));
-  const selected = hillCenters.slice(0, targetHills);
+  // Select hills strategically - aim for 15-25 well-distributed hills
+  const targetHills = 15 + Math.floor(hash2D(0, 0, seed) * 10);
+  const selected = hillCenters.slice(0, Math.min(hillCenters.length, targetHills));
 
   for (let i = 0; i < selected.length; i += 1) {
     const hill = selected[i];
-    // Clamp to map bounds
-    const clampedX = Math.max(200, Math.min(MAP_CONFIG.width - 200, hill.x));
-    const clampedY = Math.max(200, Math.min(MAP_CONFIG.height - 200, hill.y));
+    // Clamp to map bounds with margin
+    const clampedX = Math.max(300, Math.min(MAP_CONFIG.width - 300, hill.x));
+    const clampedY = Math.max(300, Math.min(MAP_CONFIG.height - 300, hill.y));
     mapData.hills.push({
       x: clampedX,
       y: clampedY,
@@ -637,30 +642,54 @@ function generateTerrain() {
 }
 
 function generateRoads() {
-  // Roads avoid hills - use the generated hills to path around them
+  const seed = mapData.topoSeed || 42;
+  
+  // Military-style road network: main highway crossing the map, with secondary roads
+  // Roads use deterministic positions based on seed for consistent default map
+  
+  // Main highway - crosses diagonally but avoids major hill centers
+  const highwayStart = { 
+    x: 150, 
+    y: 800 + hash2D(0, 1, seed) * 600 
+  };
+  const highwayEnd = { 
+    x: 7850, 
+    y: 4500 + hash2D(1, 0, seed) * 500 
+  };
+  
   mapData.roads.push({
     type: "Highway",
-    points: buildOrganicRoadPoints(
-      { x: 100, y: 1200 + Math.random() * 500 },
-      { x: 7900, y: 4200 + Math.random() * 400 }
-    )
+    points: buildOrganicRoadPoints(highwayStart, highwayEnd)
   });
+  
+  // Secondary highway running perpendicular
+  const highway2Start = { 
+    x: 1500 + hash2D(2, 1, seed) * 400, 
+    y: 100 
+  };
+  const highway2End = { 
+    x: 6500 + hash2D(3, 2, seed) * 500, 
+    y: 5900 
+  };
+  
   mapData.roads.push({
-    type: "Dirt",
-    points: buildOrganicRoadPoints(
-      { x: 1400 + Math.random() * 400, y: 100 },
-      { x: 6200 + Math.random() * 400, y: 5900 }
-    )
+    type: "Highway",
+    points: buildOrganicRoadPoints(highway2Start, highway2End)
   });
-
-  // Add some secondary roads
-  const extraRoads = 1 + Math.floor(Math.random() * 2);
-  for (let r = 0; r < extraRoads; r += 1) {
+  
+  // Dirt roads connecting areas - use seeded randomness
+  const dirtRoadCount = 2 + Math.floor(hash2D(1, 2, seed) * 2);
+  for (let r = 0; r < dirtRoadCount; r += 1) {
+    const startX = 400 + hash2D(r + 10, r + 20, seed) * 3000;
+    const startY = 400 + hash2D(r + 30, r + 40, seed) * 2500;
+    const endX = 4000 + hash2D(r + 50, r + 60, seed) * 3500;
+    const endY = 3000 + hash2D(r + 70, r + 80, seed) * 2500;
+    
     mapData.roads.push({
       type: "Dirt",
       points: buildOrganicRoadPoints(
-        { x: 500 + Math.random() * 2000, y: 500 + Math.random() * 1000 },
-        { x: 4000 + Math.random() * 2000, y: 3000 + Math.random() * 1500 }
+        { x: startX, y: startY },
+        { x: endX, y: endY }
       )
     });
   }

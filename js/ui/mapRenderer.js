@@ -159,13 +159,14 @@ export default class MapRenderer {
   }
 
   drawBackground(ctx) {
-    ctx.fillStyle = "#f7f6f1";
+    // Military map tan/beige background
+    ctx.fillStyle = MAP_CONFIG.backgroundColor;
     ctx.fillRect(0, 0, MAP_CONFIG.width, MAP_CONFIG.height);
 
     if (this.overlayImage && this.overlayImage.complete) {
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = "high";
-      ctx.globalAlpha = 0.95;
+      ctx.globalAlpha = 0.85;
       ctx.drawImage(this.overlayImage, 0, 0, MAP_CONFIG.width, MAP_CONFIG.height);
       ctx.globalAlpha = 1;
       return;
@@ -175,10 +176,13 @@ export default class MapRenderer {
     if (topo) {
       this.drawTopoContours(ctx, topo);
     }
+    
+    // Draw hill shading for terrain depth
+    this.drawHillShading(ctx);
   }
 
   getTopoData() {
-    const seed = typeof mapData.topoSeed === "number" ? mapData.topoSeed : 1337;
+    const seed = typeof mapData.topoSeed === "number" ? mapData.topoSeed : 42;
     const version = typeof mapData.topoVersion === "number" ? mapData.topoVersion : 0;
     const key = `${seed}_${version}_${mapData.hills.length}_${mapData.roads.length}`;
     if (this.topoKey !== key) {
@@ -189,8 +193,9 @@ export default class MapRenderer {
   }
 
   buildTopoData(seed) {
-    const cols = 320;
-    const rows = 240;
+    // Higher resolution for smoother military-style contours
+    const cols = 400;
+    const rows = 300;
     const cellW = MAP_CONFIG.width / (cols - 1);
     const cellH = MAP_CONFIG.height / (rows - 1);
     const heights = [];
@@ -199,14 +204,16 @@ export default class MapRenderer {
       for (let x = 0; x < cols; x += 1) {
         const wx = x * cellW;
         const wy = y * cellH;
-        let h = this.fbm(wx * 0.0007, wy * 0.0007, seed);
-        h = h * 0.75 + 0.1;
+        // Base terrain noise with lower frequency for larger features
+        let h = this.fbm(wx * 0.0005, wy * 0.0005, seed);
+        h = h * 0.7 + 0.15;
 
+        // Add hill influence to contour generation
         for (let i = 0; i < mapData.hills.length; i += 1) {
           const hill = mapData.hills[i];
           const dist = Math.hypot(wx - hill.x, wy - hill.y);
-          if (dist < hill.radius) {
-            const boost = (1 - dist / hill.radius) * (hill.elevation - 1) * 0.4;
+          if (dist < hill.radius * 1.3) {
+            const boost = (1 - dist / (hill.radius * 1.3)) * ((hill.elevation - 100) / 300) * 0.5;
             h += boost;
           }
         }
@@ -214,8 +221,9 @@ export default class MapRenderer {
       }
     }
 
+    // Military map contour intervals: closer spacing for more detail
     const levels = [];
-    for (let level = 0.18; level <= 0.9; level += 0.05) {
+    for (let level = 0.2; level <= 0.85; level += 0.03) {
       levels.push(Number(level.toFixed(3)));
     }
 
@@ -229,9 +237,10 @@ export default class MapRenderer {
 
   drawTopoContours(ctx, topo) {
     for (let i = 0; i < topo.levels.length; i += 1) {
-      const isMajor = i % 3 === 0;
-      ctx.lineWidth = (isMajor ? 1.2 : 0.6) / this.camera.zoom;
-      ctx.strokeStyle = isMajor ? "rgba(0, 0, 0, 0.85)" : "rgba(0, 0, 0, 0.55)";
+      const isMajor = i % 5 === 0;  // Every 5th contour is major (index contour)
+      ctx.lineWidth = (isMajor ? 1.8 : 0.7) / this.camera.zoom;
+      ctx.strokeStyle = isMajor ? MAP_CONFIG.contourColorMajor : MAP_CONFIG.contourColorMinor;
+      ctx.globalAlpha = isMajor ? 0.9 : 0.6;
       ctx.beginPath();
       const segments = topo.contours[i];
       for (let s = 0; s < segments.length; s += 1) {
@@ -241,6 +250,7 @@ export default class MapRenderer {
       }
       ctx.stroke();
     }
+    ctx.globalAlpha = 1;
   }
 
   buildContourSegments(heights, cols, rows, cellW, cellH, levels) {
@@ -416,15 +426,45 @@ export default class MapRenderer {
       if (!points || points.length < 2) {
         continue;
       }
-      ctx.strokeStyle = road.type === "Highway" ? "rgba(0, 0, 0, 0.65)" : "rgba(0, 0, 0, 0.45)";
-      ctx.lineWidth = road.type === "Highway" ? 10 : 6;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(points[0].x, points[0].y);
-      for (let p = 1; p < points.length; p += 1) {
-        ctx.lineTo(points[p].x, points[p].y);
+      
+      // Military map road styling
+      if (road.type === "Highway") {
+        // Highway: wider, darker brown road with light center stripe
+        ctx.strokeStyle = "#5c4a3d";
+        ctx.lineWidth = 14;
+        ctx.lineCap = "round";
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let p = 1; p < points.length; p += 1) {
+          ctx.lineTo(points[p].x, points[p].y);
+        }
+        ctx.stroke();
+        
+        // Light center stripe for highway
+        ctx.strokeStyle = "#8b7355";
+        ctx.lineWidth = 3;
+        ctx.setLineDash([15, 12]);
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let p = 1; p < points.length; p += 1) {
+          ctx.lineTo(points[p].x, points[p].y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
+      } else {
+        // Dirt road: thinner, lighter brown
+        ctx.strokeStyle = "#7a6350";
+        ctx.lineWidth = 7;
+        ctx.lineCap = "round";
+        ctx.setLineDash([8, 6]);
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let p = 1; p < points.length; p += 1) {
+          ctx.lineTo(points[p].x, points[p].y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
       }
-      ctx.stroke();
     }
   }
 
@@ -432,49 +472,83 @@ export default class MapRenderer {
     if (!mapData.buildings) {
       return;
     }
-    ctx.fillStyle = "rgba(0, 0, 0, 0.04)";
-    ctx.strokeStyle = "rgba(0, 0, 0, 0.55)";
-    ctx.lineWidth = 1;
+    // Military-style buildings: simple gray blocks with outlines
+    ctx.fillStyle = "#c4b8a8";
+    ctx.strokeStyle = "#5a4d3f";
+    ctx.lineWidth = 1.2;
     for (let i = 0; i < mapData.buildings.length; i += 1) {
       const b = mapData.buildings[i];
+      // Building fill
       ctx.fillRect(b.x, b.y, b.width, b.height);
+      // Building outline
       ctx.strokeRect(b.x, b.y, b.width, b.height);
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.25)";
+      // Roof detail line (horizontal)
       ctx.beginPath();
-      ctx.moveTo(b.x, b.y + b.height * 0.5);
-      ctx.lineTo(b.x + b.width, b.y + b.height * 0.5);
+      ctx.moveTo(b.x, b.y + b.height * 0.4);
+      ctx.lineTo(b.x + b.width, b.y + b.height * 0.4);
       ctx.stroke();
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.55)";
+      // Roof detail line (vertical)
+      ctx.beginPath();
+      ctx.moveTo(b.x + b.width * 0.5, b.y);
+      ctx.lineTo(b.x + b.width * 0.5, b.y + b.height * 0.4);
+      ctx.stroke();
     }
   }
 
   drawHills(ctx) {
     for (let i = 0; i < mapData.hills.length; i += 1) {
       const hill = mapData.hills[i];
+      
+      // Hill shading with military-style brown tones
       const grad = ctx.createRadialGradient(
         hill.x,
         hill.y,
-        hill.radius * 0.2,
+        hill.radius * 0.15,
         hill.x,
         hill.y,
         hill.radius
       );
-      grad.addColorStop(0, "rgba(0, 0, 0, 0.05)");
-      grad.addColorStop(1, "rgba(0, 0, 0, 0)");
+      grad.addColorStop(0, "rgba(139, 119, 101, 0.25)");
+      grad.addColorStop(0.5, "rgba(139, 119, 101, 0.12)");
+      grad.addColorStop(1, "rgba(139, 119, 101, 0)");
       ctx.fillStyle = grad;
       ctx.beginPath();
       ctx.arc(hill.x, hill.y, hill.radius, 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.25)";
-      ctx.lineWidth = 1;
+      // Hill peak marker (small circle at summit)
+      ctx.strokeStyle = MAP_CONFIG.contourColorMajor;
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(hill.x, hill.y, hill.radius * 0.55, 0, Math.PI * 2);
+      ctx.arc(hill.x, hill.y, hill.radius * 0.12, 0, Math.PI * 2);
       ctx.stroke();
-
-      ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-      ctx.font = `${Math.max(12, 20 / this.camera.zoom)}px "Trebuchet MS"`;
-      ctx.fillText("x" + hill.elevation.toFixed(1), hill.x + hill.radius * 0.1, hill.y);
+      
+      // Elevation label in military style
+      ctx.fillStyle = MAP_CONFIG.contourColorMajor;
+      ctx.font = `bold ${Math.max(11, 18 / this.camera.zoom)}px Arial`;
+      ctx.fillText(hill.elevation.toFixed(0) + "m", hill.x - 10, hill.y + 4);
+    }
+  }
+  
+  drawHillShading(ctx) {
+    // Subtle terrain shading based on hills
+    for (let i = 0; i < mapData.hills.length; i += 1) {
+      const hill = mapData.hills[i];
+      const shadeGrad = ctx.createRadialGradient(
+        hill.x - hill.radius * 0.15,
+        hill.y - hill.radius * 0.15,
+        hill.radius * 0.1,
+        hill.x,
+        hill.y,
+        hill.radius * 1.2
+      );
+      shadeGrad.addColorStop(0, "rgba(101, 67, 33, 0.08)");
+      shadeGrad.addColorStop(0.6, "rgba(101, 67, 33, 0.03)");
+      shadeGrad.addColorStop(1, "rgba(101, 67, 33, 0)");
+      ctx.fillStyle = shadeGrad;
+      ctx.beginPath();
+      ctx.arc(hill.x, hill.y, hill.radius * 1.2, 0, Math.PI * 2);
+      ctx.fill();
     }
   }
 
