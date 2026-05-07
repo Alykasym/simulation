@@ -159,7 +159,8 @@ export default class MapRenderer {
   }
 
   drawBackground(ctx) {
-    ctx.fillStyle = "#f7f6f1";
+    // Soviet/Russian military topo map paper color — warm cream/buff
+    ctx.fillStyle = "#eee8d8";
     ctx.fillRect(0, 0, MAP_CONFIG.width, MAP_CONFIG.height);
 
     if (this.overlayImage && this.overlayImage.complete) {
@@ -189,8 +190,9 @@ export default class MapRenderer {
   }
 
   buildTopoData(seed) {
-    const cols = 320;
-    const rows = 240;
+    // High resolution grid for smooth contours
+    const cols = 400;
+    const rows = 300;
     const cellW = MAP_CONFIG.width / (cols - 1);
     const cellH = MAP_CONFIG.height / (rows - 1);
     const heights = [];
@@ -199,39 +201,53 @@ export default class MapRenderer {
       for (let x = 0; x < cols; x += 1) {
         const wx = x * cellW;
         const wy = y * cellH;
-        let h = this.fbm(wx * 0.0007, wy * 0.0007, seed);
-        h = h * 0.75 + 0.1;
 
+        // Large-scale rolling terrain (base)
+        let h = this.fbm(wx * 0.00048, wy * 0.00048, seed);
+        // Mid-scale variation — gives individual hill shapes
+        h += this.fbm(wx * 0.0016, wy * 0.0016, seed + 999) * 0.28;
+        // Fine terrain wrinkles
+        h += this.fbm(wx * 0.0045, wy * 0.0045, seed + 2017) * 0.10;
+
+        // Normalize into useful range — center the terrain so most of map
+        // is in the 0.25–0.80 band where contours are dense
+        h = h * 0.68 + 0.16;
+        // Slight global elevation gradient (common in real terrain)
+        h += (wx / MAP_CONFIG.width) * 0.05 - (wy / MAP_CONFIG.height) * 0.03;
+
+        // Hill boosts from user-placed / generated hills
         for (let i = 0; i < mapData.hills.length; i += 1) {
           const hill = mapData.hills[i];
           const dist = Math.hypot(wx - hill.x, wy - hill.y);
           if (dist < hill.radius) {
-            const boost = (1 - dist / hill.radius) * (hill.elevation - 1) * 0.4;
-            h += boost;
+            const t = 1 - dist / hill.radius;
+            // Smooth falloff (cosine curve) for natural contour shapes
+            const smooth = t * t * (3 - 2 * t);
+            h += smooth * (hill.elevation - 1) * 0.40;
           }
         }
         heights.push(Math.max(0, Math.min(1, h)));
       }
     }
 
+    // 28 contour levels at 0.025 step — matches the dense contour spacing
+    // visible on Soviet 1:50 000 topo sheets (10m or 20m contour interval)
     const levels = [];
-    for (let level = 0.18; level <= 0.9; level += 0.05) {
-      levels.push(Number(level.toFixed(3)));
+    for (let level = 0.125; level <= 0.92; level += 0.028) {
+      levels.push(Number(level.toFixed(4)));
     }
 
     const contours = this.buildContourSegments(heights, cols, rows, cellW, cellH, levels);
-
-    return {
-      levels: levels,
-      contours: contours
-    };
+    return { levels, contours };
   }
 
   drawTopoContours(ctx, topo) {
     for (let i = 0; i < topo.levels.length; i += 1) {
-      const isMajor = i % 3 === 0;
-      ctx.lineWidth = (isMajor ? 1.2 : 0.6) / this.camera.zoom;
-      ctx.strokeStyle = isMajor ? "rgba(0, 0, 0, 0.85)" : "rgba(0, 0, 0, 0.55)";
+      // Every 5th contour is a major (index contour) — matches real topo conventions
+      const isMajor = i % 5 === 0;
+      ctx.lineWidth = (isMajor ? 1.6 : 0.7) / this.camera.zoom;
+      // Authentic Soviet topo brown: major = dark sienna, minor = light tan-brown
+      ctx.strokeStyle = isMajor ? "rgba(140, 80, 28, 0.92)" : "rgba(180, 120, 55, 0.62)";
       ctx.beginPath();
       const segments = topo.contours[i];
       for (let s = 0; s < segments.length; s += 1) {
@@ -345,11 +361,11 @@ export default class MapRenderer {
     let amp = 1;
     let freq = 1;
     let max = 0;
-    for (let i = 0; i < 4; i += 1) {
+    for (let i = 0; i < 6; i += 1) {
       value += this.smoothNoise(x * freq, y * freq, seed + i * 17) * amp;
       max += amp;
-      amp *= 0.5;
-      freq *= 2;
+      amp *= 0.52;
+      freq *= 2.1;
     }
     return value / max;
   }
@@ -383,12 +399,9 @@ export default class MapRenderer {
   }
 
   drawGrid(ctx, rect) {
-    if (!this.state.view || !this.state.view.showGrid) {
-      return;
-    }
-
-    ctx.strokeStyle = "rgba(0, 0, 0, 0.12)";
-    ctx.lineWidth = 1 / this.camera.zoom;
+    // Military topo grid is always visible — thin black lines with coordinate labels
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.28)";
+    ctx.lineWidth = 0.7 / this.camera.zoom;
 
     const halfW = rect.width / (2 * this.camera.zoom);
     const halfH = rect.height / (2 * this.camera.zoom);
@@ -407,6 +420,27 @@ export default class MapRenderer {
       ctx.lineTo(endX, y);
     }
     ctx.stroke();
+
+    // Coordinate labels at grid intersections (every 2 squares)
+    const labelInterval = GRID_SIZE * 2;
+    const labelStartX = Math.floor((this.camera.x - halfW) / labelInterval) * labelInterval;
+    const labelStartY = Math.floor((this.camera.y - halfH) / labelInterval) * labelInterval;
+    const fontSize = Math.max(7, Math.min(14, 11 / this.camera.zoom));
+    ctx.font = `bold ${fontSize}px "Arial Narrow", Arial, sans-serif`;
+    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
+    ctx.textAlign = "left";
+    ctx.textBaseline = "top";
+
+    for (let x = labelStartX; x <= endX; x += labelInterval) {
+      for (let y = labelStartY; y <= endY; y += labelInterval) {
+        if (x < 0 || y < 0 || x > MAP_CONFIG.width || y > MAP_CONFIG.height) continue;
+        const gx = Math.round(x / GRID_SIZE);
+        const gy = Math.round(y / GRID_SIZE);
+        // Two-digit grid reference like Soviet maps
+        const label = String(gx % 100).padStart(2, "0") + " " + String(gy % 100).padStart(2, "0");
+        ctx.fillText(label, x + 3 / this.camera.zoom, y + 2 / this.camera.zoom);
+      }
+    }
   }
 
   drawRoads(ctx) {
@@ -416,15 +450,47 @@ export default class MapRenderer {
       if (!points || points.length < 2) {
         continue;
       }
-      ctx.strokeStyle = road.type === "Highway" ? "rgba(0, 0, 0, 0.65)" : "rgba(0, 0, 0, 0.45)";
-      ctx.lineWidth = road.type === "Highway" ? 10 : 6;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(points[0].x, points[0].y);
-      for (let p = 1; p < points.length; p += 1) {
-        ctx.lineTo(points[p].x, points[p].y);
+
+      if (road.type === "Highway") {
+        // === Military topo highway: thick black outer + thin white inner (double-line style) ===
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+
+        // Outer black line
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.88)";
+        ctx.lineWidth = 9;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let p = 1; p < points.length; p += 1) {
+          ctx.lineTo(points[p].x, points[p].y);
+        }
+        ctx.stroke();
+
+        // Inner white/cream fill — creates the classic two-line road symbol
+        ctx.strokeStyle = "#f5efdf";
+        ctx.lineWidth = 4.5;
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let p = 1; p < points.length; p += 1) {
+          ctx.lineTo(points[p].x, points[p].y);
+        }
+        ctx.stroke();
+
+      } else {
+        // === Dirt/secondary road: thin dashed black line ===
+        ctx.strokeStyle = "rgba(0, 0, 0, 0.70)";
+        ctx.lineWidth = 2.5;
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        ctx.setLineDash([12, 7]);
+        ctx.beginPath();
+        ctx.moveTo(points[0].x, points[0].y);
+        for (let p = 1; p < points.length; p += 1) {
+          ctx.lineTo(points[p].x, points[p].y);
+        }
+        ctx.stroke();
+        ctx.setLineDash([]);
       }
-      ctx.stroke();
     }
   }
 
@@ -432,49 +498,58 @@ export default class MapRenderer {
     if (!mapData.buildings) {
       return;
     }
-    ctx.fillStyle = "rgba(0, 0, 0, 0.04)";
-    ctx.strokeStyle = "rgba(0, 0, 0, 0.55)";
-    ctx.lineWidth = 1;
+    // Military topo building symbols: solid black small rectangles/squares
+    ctx.fillStyle = "rgba(0, 0, 0, 0.82)";
+    ctx.strokeStyle = "rgba(0, 0, 0, 0.82)";
+    ctx.lineWidth = 0.5;
     for (let i = 0; i < mapData.buildings.length; i += 1) {
       const b = mapData.buildings[i];
-      ctx.fillRect(b.x, b.y, b.width, b.height);
-      ctx.strokeRect(b.x, b.y, b.width, b.height);
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.25)";
-      ctx.beginPath();
-      ctx.moveTo(b.x, b.y + b.height * 0.5);
-      ctx.lineTo(b.x + b.width, b.y + b.height * 0.5);
-      ctx.stroke();
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.55)";
+      // Clamp to a tight symbol size like Soviet topo maps (small filled squares)
+      const sw = Math.min(b.width, 18);
+      const sh = Math.min(b.height, 14);
+      ctx.fillRect(b.x + (b.width - sw) / 2, b.y + (b.height - sh) / 2, sw, sh);
     }
   }
 
   drawHills(ctx) {
     for (let i = 0; i < mapData.hills.length; i += 1) {
       const hill = mapData.hills[i];
-      const grad = ctx.createRadialGradient(
-        hill.x,
-        hill.y,
-        hill.radius * 0.2,
-        hill.x,
-        hill.y,
-        hill.radius
-      );
-      grad.addColorStop(0, "rgba(0, 0, 0, 0.05)");
-      grad.addColorStop(1, "rgba(0, 0, 0, 0)");
-      ctx.fillStyle = grad;
-      ctx.beginPath();
-      ctx.arc(hill.x, hill.y, hill.radius, 0, Math.PI * 2);
-      ctx.fill();
+      const isMajorPeak = hill.elevation >= 1.5; // triangle for significant peaks, dot for minor
 
-      ctx.strokeStyle = "rgba(0, 0, 0, 0.25)";
-      ctx.lineWidth = 1;
-      ctx.beginPath();
-      ctx.arc(hill.x, hill.y, hill.radius * 0.55, 0, Math.PI * 2);
-      ctx.stroke();
+      // Realistic elevation label (580–830m range, like Soviet maps)
+      const metersRaw = 580 + (hill.elevation - 1.0) * 160;
+      const subMeter = ((Math.floor(hill.x) * 13 + Math.floor(hill.y) * 7) % 10) * 0.1;
+      const elevLabel = (metersRaw + subMeter).toFixed(1);
 
-      ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-      ctx.font = `${Math.max(12, 20 / this.camera.zoom)}px "Trebuchet MS"`;
-      ctx.fillText("x" + hill.elevation.toFixed(1), hill.x + hill.radius * 0.1, hill.y);
+      const fontSize = Math.max(9, Math.min(15, 11 / Math.max(0.3, this.camera.zoom)));
+      ctx.font = `bold ${fontSize}px "Arial Narrow", Arial, sans-serif`;
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+
+      if (isMajorPeak) {
+        // === Major peak: solid filled triangle + bold elevation label ===
+        // Exactly like "△ 784.0 г. Каракыр" in the sample
+        const triSize = Math.max(7, Math.min(16, hill.radius * 0.022));
+        ctx.fillStyle = "rgba(0, 0, 0, 0.85)";
+        ctx.beginPath();
+        ctx.moveTo(hill.x, hill.y - triSize);
+        ctx.lineTo(hill.x + triSize * 0.72, hill.y + triSize * 0.42);
+        ctx.lineTo(hill.x - triSize * 0.72, hill.y + triSize * 0.42);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = "rgba(0, 0, 0, 0.88)";
+        ctx.fillText(elevLabel, hill.x + triSize + 4, hill.y - triSize * 0.15);
+      } else {
+        // === Minor high-point: small dot • + lighter label ===
+        // Like "• 637.6" style markers scattered across the sample
+        const dotR = Math.max(2.5, Math.min(5, 3.5 / Math.max(0.3, this.camera.zoom)));
+        ctx.fillStyle = "rgba(0, 0, 0, 0.80)";
+        ctx.beginPath();
+        ctx.arc(hill.x, hill.y, dotR, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.fillStyle = "rgba(0, 0, 0, 0.72)";
+        ctx.fillText(elevLabel, hill.x + dotR + 4, hill.y);
+      }
     }
   }
 

@@ -15,7 +15,7 @@ import {
   WEAPON_TYPES,
   ARMOR_CLASSES
 } from "./models/unitDictionary.js";
-import { mapData } from "./models/mapData.js";
+import { MAP_CONFIG, mapData } from "./models/mapData.js";
 
 const state = {
   units: placedUnits,
@@ -36,7 +36,7 @@ const state = {
   },
   selectedUnitId: null,
   view: {
-    showGrid: false
+    showGrid: true
   },
   simulation: {
     mode: "neutralize",
@@ -88,7 +88,23 @@ const simulation = new SimulationEngine(state, renderer, {
 
 initializeTemplateSelect();
 
+// Generate the default map on first load so roads & buildings are visible immediately
+initializeDefaultMap();
+
 function initializeTemplateSelect() {
+  const templates = getAllTemplates();
+  domManager.refreshTemplateOptions(templates);
+  if (templates.length > 0) {
+    state.placement.templateId = templates[0].id;
+  }
+}
+
+function initializeDefaultMap() {
+  generateTerrain();
+  generateRoads();
+  generateBuildings();
+  bumpTopoVersion();
+
   const templates = getAllTemplates();
   domManager.refreshTemplateOptions(templates);
   if (templates.length > 0) {
@@ -543,10 +559,9 @@ function generateTerrain() {
   const seed = mapData.topoSeed || 1337;
   mapData.hills = [];
 
-  // Generate terrain heightfield using multiple octaves of noise
-  // Then extract hill features from the heightfield
-  const TERRAIN_COLS = 80;
-  const TERRAIN_ROWS = 60;
+  // High-resolution heightfield for accurate hill detection
+  const TERRAIN_COLS = 100;
+  const TERRAIN_ROWS = 75;
   const cellW = MAP_CONFIG.width / TERRAIN_COLS;
   const cellH = MAP_CONFIG.height / TERRAIN_ROWS;
   const heightMap = [];
@@ -555,112 +570,115 @@ function generateTerrain() {
     for (let tx = 0; tx < TERRAIN_COLS; tx += 1) {
       const wx = tx * cellW;
       const wy = ty * cellH;
-      // Multi-octave noise for natural terrain
-      let h = fbm(wx * 0.001, wy * 0.001, seed, 6);
-      // Bias towards valleys with occasional ridges
-      h = Math.pow(h, 0.7);
-      heightMap.push(h);
+      // MUST match buildTopoData in mapRenderer.js exactly so hill markers sit on contour peaks
+      let h = fbm(wx * 0.00048, wy * 0.00048, seed, 6);
+      h += fbm(wx * 0.0016, wy * 0.0016, seed + 999, 3) * 0.28;
+      h += fbm(wx * 0.0045, wy * 0.0045, seed + 2017, 2) * 0.10;
+      h = h * 0.68 + 0.16;
+      h += (wx / MAP_CONFIG.width) * 0.05 - (wy / MAP_CONFIG.height) * 0.03;
+      heightMap.push(Math.max(0, Math.min(1, h)));
     }
   }
 
-  // Extract well-shaped hills from heightfield
-  // We find local maxima in groups
+  // Detect local maxima with sufficient separation to avoid crowded markers
   const visited = new Array(TERRAIN_COLS * TERRAIN_ROWS).fill(false);
   const hillCenters = [];
 
-  for (let ty = 1; ty < TERRAIN_ROWS - 1; ty += 1) {
-    for (let tx = 1; tx < TERRAIN_COLS - 1; tx += 1) {
+  for (let ty = 2; ty < TERRAIN_ROWS - 2; ty += 1) {
+    for (let tx = 2; tx < TERRAIN_COLS - 2; tx += 1) {
       const idx = ty * TERRAIN_COLS + tx;
+      if (visited[idx]) continue;
       const h = heightMap[idx];
-      const threshold = 0.62 + hash2D(tx, ty, seed + 100) * 0.15;
 
-      // Local maximum check
-      if (h > threshold) {
-        const neighbors = [
-          heightMap[(ty - 1) * TERRAIN_COLS + tx],
-          heightMap[(ty + 1) * TERRAIN_COLS + tx],
-          heightMap[ty * TERRAIN_COLS + tx - 1],
-          heightMap[ty * TERRAIN_COLS + tx + 1]
-        ];
-        let isMax = true;
-        for (let n = 0; n < neighbors.length; n += 1) {
-          if (neighbors[n] >= h) {
+      // Only mark as peak if clearly above surroundings
+      const threshold = 0.55 + hash2D(tx, ty, seed + 100) * 0.18;
+      if (h < threshold) continue;
+
+      // 5×5 local maximum check for sharper peak selection
+      let isMax = true;
+      outer: for (let dy = -2; dy <= 2; dy += 1) {
+        for (let dx = -2; dx <= 2; dx += 1) {
+          if (dx === 0 && dy === 0) continue;
+          const ni = (ty + dy) * TERRAIN_COLS + (tx + dx);
+          if (ni >= 0 && ni < heightMap.length && heightMap[ni] >= h) {
             isMax = false;
-            break;
+            break outer;
+          }
+        }
+      }
+
+      if (isMax) {
+        // Suppress a wide radius so peaks are well-spaced
+        const suppressR = 4 + Math.floor(hash2D(tx, ty, seed + 50) * 3);
+        for (let dy = -suppressR; dy <= suppressR; dy += 1) {
+          for (let dx = -suppressR; dx <= suppressR; dx += 1) {
+            const ni = (ty + dy) * TERRAIN_COLS + (tx + dx);
+            if (ni >= 0 && ni < visited.length) visited[ni] = true;
           }
         }
 
-        if (isMax && !visited[idx]) {
-          // Mark neighbors as visited to prevent overlapping hills
-          const radiusCells = 1 + Math.floor(hash2D(tx, ty, seed + 50) * 2);
-          for (let dy = -radiusCells; dy <= radiusCells; dy += 1) {
-            for (let dx = -radiusCells; dx <= radiusCells; dx += 1) {
-              const ni = (ty + dy) * TERRAIN_COLS + (tx + dx);
-              if (ni >= 0 && ni < visited.length) {
-                visited[ni] = true;
-              }
-            }
-          }
+        // Elevation: scale to realistic-looking military topo values
+        // Hill.elevation is used as a multiplier in the renderer (1.0 = flat baseline)
+        // We store it here; the renderer turns it into display labels
+        const elevation = 1.1 + h * 1.5;
+        // Radius proportional to peak height and noise-varied
+        const radius = 320 + h * 550 + hash2D(tx, ty, seed + 200) * 180;
 
-          // Elevation: 1.2 to 2.8 based on noise
-          const elevation = 1.2 + h * 1.6;
-          // Radius: proportional to elevation, 300-800 meters
-          const radius = 280 + h * 500 + hash2D(tx, ty, seed + 200) * 150;
+        // Add slight position jitter for naturalness
+        const jx = (hash2D(tx, ty, seed + 300) - 0.5) * cellW * 0.4;
+        const jy = (hash2D(tx, ty, seed + 400) - 0.5) * cellH * 0.4;
 
-          hillCenters.push({
-            x: tx * cellW + cellW / 2 + (hash2D(tx, ty, seed + 300) - 0.5) * cellW * 0.5,
-            y: ty * cellH + cellH / 2 + (hash2D(tx, ty, seed + 400) - 0.5) * cellH * 0.5,
-            elevation: Math.round(elevation * 10) / 10,
-            radius: Math.round(radius)
-          });
-        }
+        hillCenters.push({
+          x: Math.max(300, Math.min(MAP_CONFIG.width - 300, tx * cellW + cellW / 2 + jx)),
+          y: Math.max(300, Math.min(MAP_CONFIG.height - 300, ty * cellH + cellH / 2 + jy)),
+          elevation: Math.round(elevation * 10) / 10,
+          radius: Math.round(radius)
+        });
       }
     }
   }
 
-  // Limit hills and add them
-  const targetHills = Math.min(hillCenters.length, 35 + Math.floor(Math.random() * 20));
+  // Select a natural number of hills — similar to Soviet 1:50 000 topo sheets
+  const targetHills = Math.min(hillCenters.length, 20 + Math.floor(Math.random() * 15));
   const selected = hillCenters.slice(0, targetHills);
 
   for (let i = 0; i < selected.length; i += 1) {
-    const hill = selected[i];
-    // Clamp to map bounds
-    const clampedX = Math.max(200, Math.min(MAP_CONFIG.width - 200, hill.x));
-    const clampedY = Math.max(200, Math.min(MAP_CONFIG.height - 200, hill.y));
-    mapData.hills.push({
-      x: clampedX,
-      y: clampedY,
-      elevation: hill.elevation,
-      radius: hill.radius
-    });
+    mapData.hills.push(selected[i]);
   }
 }
 
 function generateRoads() {
-  // Roads avoid hills - use the generated hills to path around them
+  // Main highway: diagonal cross-map route (like railways/main roads on Soviet maps)
   mapData.roads.push({
     type: "Highway",
     points: buildOrganicRoadPoints(
-      { x: 100, y: 1200 + Math.random() * 500 },
-      { x: 7900, y: 4200 + Math.random() * 400 }
-    )
-  });
-  mapData.roads.push({
-    type: "Dirt",
-    points: buildOrganicRoadPoints(
-      { x: 1400 + Math.random() * 400, y: 100 },
-      { x: 6200 + Math.random() * 400, y: 5900 }
+      { x: 80 + Math.random() * 300,  y: 800 + Math.random() * 800 },
+      { x: MAP_CONFIG.width - 100,    y: 3200 + Math.random() * 1600 }
     )
   });
 
-  // Add some secondary roads
-  const extraRoads = 1 + Math.floor(Math.random() * 2);
-  for (let r = 0; r < extraRoads; r += 1) {
+  // Cross-axis highway
+  mapData.roads.push({
+    type: "Highway",
+    points: buildOrganicRoadPoints(
+      { x: 1200 + Math.random() * 600, y: 80 },
+      { x: 5400 + Math.random() * 800, y: MAP_CONFIG.height - 80 }
+    )
+  });
+
+  // Several dirt/secondary roads branching off the main routes
+  const dirtCount = 3 + Math.floor(Math.random() * 3);
+  for (let r = 0; r < dirtCount; r += 1) {
+    const fromX = 600 + Math.random() * (MAP_CONFIG.width - 1200);
+    const fromY = 400 + Math.random() * (MAP_CONFIG.height - 800);
+    const angle = Math.random() * Math.PI * 2;
+    const length = 1200 + Math.random() * 2200;
     mapData.roads.push({
       type: "Dirt",
       points: buildOrganicRoadPoints(
-        { x: 500 + Math.random() * 2000, y: 500 + Math.random() * 1000 },
-        { x: 4000 + Math.random() * 2000, y: 3000 + Math.random() * 1500 }
+        { x: fromX, y: fromY },
+        { x: Math.max(100, Math.min(MAP_CONFIG.width - 100, fromX + Math.cos(angle) * length)),
+          y: Math.max(100, Math.min(MAP_CONFIG.height - 100, fromY + Math.sin(angle) * length)) }
       )
     });
   }
